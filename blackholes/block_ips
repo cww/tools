@@ -21,6 +21,8 @@ do
     else
         cmd=(ip route add blackhole $ip)
         print "INFO: Running command: $cmd"
-        $($cmd)
+        $cmd
     fi
 done
+
+exit 0
