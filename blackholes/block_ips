@@ -1,7 +1,8 @@
 #!/bin/zsh
 #
 # This script retrieves a list of blackhole IP addresses and uses the
-# ip(8) utility to blackhole those IP addresses.
+# iptables(8) utility to blackhole those IP addresses.  Of course, This
+# script requires that kernel support for iptables is enabled.
 
 BLACKHOLES_URL="https://raw.github.com/cww/tools/master/blackholes/blackholes.txt"
 
@@ -14,12 +15,12 @@ fi
 
 for ip in $ips
 do
-    ip route list | grep "^blackhole $ip" > /dev/null
+    iptables -C INPUT -s "$ip" -j DROP 2>& /dev/null
     if [[ $? -eq 0 ]]
     then
         print "INFO: IP $ip is already in blackhole list; not adding."
     else
-        cmd=(ip route add blackhole $ip)
+        cmd=(iptables -I INPUT -s "$ip" -j DROP)
         print "INFO: Running command: $cmd"
         $cmd
     fi
