@@ -15,7 +15,9 @@ fi
 
 for ip in $ips
 do
-    iptables -C INPUT -s "$ip" -j DROP 2>& /dev/null
+    # `iptables -C` requires iptables after squeeze
+    #iptables -C INPUT -s "$ip" -j DROP 2>& /dev/null
+    iptables -L INPUT -n | grep -qE "^DROP.*\<$ip\>"
     if [[ $? -eq 0 ]]
     then
         print "INFO: IP $ip is already in blackhole list; not adding."
