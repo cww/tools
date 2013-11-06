@@ -21,34 +21,35 @@
 #LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 #OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 #THE SOFTWARE.
-#
-###########################################################################
-#
-# This script retrieves a list of blackhole IP addresses and uses the
-# iptables(8) utility to blackhole those IP addresses.  Of course, This
-# script requires that kernel support for iptables is enabled.
 
-BLACKHOLES_URL="https://raw.github.com/cww/tools/master/blackholes/blackholes.txt"
+BLACKHOLES_FILE=blackholes.txt
+TMP_FILE=.blackholes.txt
 
-ips=( $(curl -s "$BLACKHOLES_URL") )
-if [[ $? -ne 0 ]]
+if [[ ! -r $BLACKHOLES_FILE ]]
 then
-    print "ERROR: Unable to retrieve blackhole list!"
+    print "Blackholes file '$BLACKHOLES_FILE' not found" >&2
     exit 1
 fi
 
-for ip in $ips
+files=(/var/log/auth.log*)
+text_files=($BLACKHOLES_FILE)
+gzip_files=()
+
+for file in $files
 do
-    # `iptables -C` requires iptables after squeeze
-    iptables -C INPUT -s "$ip" -j DROP 2>& /dev/null
-    if [[ $? -eq 0 ]]
+    # Get the file's MIME type
+    type=$(file -ib "$file" | sed 's/;.*$//')
+    print "$file: $type"
+    if [[ $type == "text/plain" ]]
     then
-        print "INFO: IP $ip is already in blackhole list; not adding."
+        text_files+=$file
+    elif [[ $type == "application/gzip" ]]
+    then
+        gzip_files+=$file
     else
-        cmd=(iptables -I INPUT -s "$ip" -j DROP)
-        print "INFO: Running command: $cmd"
-        $cmd
+        print "Unknown file type '$type' for file: $file" >&2
     fi
 done
 
-exit 0
+zcat $gzip_files | ./print_failures $text_files > "$TMP_FILE"
+mv "$TMP_FILE" "$BLACKHOLES_FILE"
