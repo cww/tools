@@ -43,7 +43,8 @@ do
     if [[ $type == "text/plain" ]]
     then
         text_files+=$file
-    elif [[ $type == "application/gzip" ]]
+    elif [[ $type == "application/gzip" ||
+            $type == "application/x-gzip" ]]
     then
         gzip_files+=$file
     else
