@@ -84,6 +84,7 @@ sub parse_log
             $line !~ /Too many authentication failures/ &&
             $line !~ /Connection reset by peer/ &&
             $line !~ /\bsshd\[\d+\]:.*connect_to.*failed/ &&
+            $line !~ /\bsshd\[\d+\]:.*channel.*open failed/ &&
             $line !~ /\bsu\[\d+\]: /)
         {
             if ($line =~ /rhost=(\S+)/ || $line =~ /from\s+(\S+)/)
