@@ -82,7 +82,9 @@ sub parse_log
         # Check keyword(s).
         if ($line =~ /fail/i &&
             $line !~ /Too many authentication failures/ &&
-            $line !~ /Connection reset by peer/)
+            $line !~ /Connection reset by peer/ &&
+            $line !~ /\bsshd\[\d+\]:.*connect_to.*failed/ &&
+            $line !~ /\bsu\[\d+\]: /)
         {
             if ($line =~ /rhost=(\S+)/ || $line =~ /from\s+(\S+)/)
             {
