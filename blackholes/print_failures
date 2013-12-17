@@ -85,7 +85,8 @@ sub parse_log
             $line !~ /Connection reset by peer/ &&
             $line !~ /\bsshd\[\d+\]:.*connect_to.*failed/ &&
             $line !~ /\bsshd\[\d+\]:.*channel.*open failed/ &&
-            $line !~ /\bsu\[\d+\]: /)
+            $line !~ /\bsu\[\d+\]: / &&
+            $line !~ /\bsshd\[\d+\]:.*open \/dev\/\S+ failed\b/)
         {
             if ($line =~ /rhost=(\S+)/ || $line =~ /from\s+(\S+)/)
             {
