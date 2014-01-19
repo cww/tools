@@ -22,6 +22,26 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+function ip_overlap
+{
+    export BH_RANGE=$1
+    export BH_NEWIP=$2
+
+    print perl $1 $2
+    perl -MNet::IP -E \
+    '
+        my $range = Net::IP->new($ENV{BH_RANGE});
+        my $ip = Net::IP->new($ENV{BH_NEWIP});
+        exit($range->overlaps($ip) == $IP_B_IN_A_OVERLAP ? 0 : 1)
+    '
+    local ret=$?
+
+    unset BH_RANGE
+    unset BH_NEWIP
+
+    return $ret
+}
+
 BLACKHOLES_FILE=blackholes.txt
 TMP_FILE=.blackholes.txt
 
@@ -32,7 +52,7 @@ then
 fi
 
 files=(/var/log/auth.log*)
-text_files=($BLACKHOLES_FILE)
+text_files=()
 gzip_files=()
 
 for file in $files
@@ -52,5 +72,30 @@ do
     fi
 done
 
-zcat $gzip_files | ./print_failures $text_files > "$TMP_FILE"
-mv "$TMP_FILE" "$BLACKHOLES_FILE"
+new_ips=( $(zcat $gzip_files | ./print_failures $text_files) )
+ips=( $(cat "$BLACKHOLES_FILE") )
+
+for new_ip in $new_ips
+do
+    local found=0
+    for ip in $ips
+    do
+        if ip_overlap $ip $new_ip
+        then
+            found=1
+            break
+        fi
+    done
+
+    if [[ $found -eq 0 ]]
+    then
+        ips+=$new_ip
+    fi
+done
+
+for ip in $ips
+do
+    print $ip
+done | sort -V > $TMP_FILE
+
+mv -f "$TMP_FILE" "$BLACKHOLES_FILE"
