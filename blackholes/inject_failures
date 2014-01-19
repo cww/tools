@@ -27,7 +27,6 @@ function ip_overlap
     export BH_RANGE=$1
     export BH_NEWIP=$2
 
-    print perl $1 $2
     perl -MNet::IP -E \
     '
         my $range = Net::IP->new($ENV{BH_RANGE});
