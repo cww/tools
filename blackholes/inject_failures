@@ -46,8 +46,8 @@ function ip4_overlap
         fi
     fi
 
-    range_masked=$(( $(ip4_to_num $range) >> $mask ))
-    ip_masked=$(( $(ip4_to_num $ip) >> $mask ))
+    range_masked=$(( $(ip4_to_num $range) >> (32 - $mask) ))
+    ip_masked=$(( $(ip4_to_num $ip) >> (32 - $mask) ))
 
     if [[ $range_masked == $ip_masked ]]
     then
