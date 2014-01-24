@@ -22,23 +22,39 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-function ip_overlap
+function ip4_to_num
 {
-    export BH_RANGE=$1
-    export BH_NEWIP=$2
+    ip=$1
+    IFS=. read -r a b c d <<< "$ip"
+    print $((a * 256 ** 3 + b * 256 ** 2 + c * 256 + d))
+}
 
-    perl -MNet::IP -E \
-    '
-        my $range = Net::IP->new($ENV{BH_RANGE});
-        my $ip = Net::IP->new($ENV{BH_NEWIP});
-        exit($range->overlaps($ip) == $IP_B_IN_A_OVERLAP ? 0 : 1)
-    '
-    local ret=$?
+function ip4_overlap
+{
+    local range=$1
+    local ip=$2
 
-    unset BH_RANGE
-    unset BH_NEWIP
+    IFS=/ read -r net mask <<< "$range"
 
-    return $ret
+    if [[ -z $net || -z $mask ]]
+    then
+        if [[ $range == $ip ]]
+        then
+            return 0
+        else
+            return 1
+        fi
+    fi
+
+    range_masked=$(( $(ip4_to_num $range) >> $mask ))
+    ip_masked=$(( $(ip4_to_num $ip) >> $mask ))
+
+    if [[ $range_masked == $ip_masked ]]
+    then
+        return 0
+    else
+        return 1
+    fi
 }
 
 BLACKHOLES_FILE=blackholes.txt
@@ -79,7 +95,7 @@ do
     local found=0
     for ip in $ips
     do
-        if ip_overlap $ip $new_ip
+        if ip4_overlap $ip $new_ip
         then
             found=1
             break
