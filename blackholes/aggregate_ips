@@ -1,0 +1,71 @@
+#!/usr/bin/perl
+#
+# The MIT License (MIT)
+#
+# Copyright (c) 2014 Colin Wetherbee
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+use common::sense;
+
+use constant FILENAME => 'blackholes.txt';
+use constant TARGET_NETMASK => 25;
+
+sub ip4_to_num
+{
+    my ($ip) = @_;
+    my ($a, $b, $c, $d) = split(/\./, $ip);
+    return $a * 256 ** 3 +
+           $b * 256 ** 2 +
+           $c * 256 ** 1 +
+           $d;
+}
+
+my $fh;
+open($fh, '<', FILENAME) or die $!;
+
+my %ips;
+my %masks;
+for my $ip (<$fh>)
+{
+    chomp $ip;
+    next unless $ip =~ /^\d+\.\d+\.\d+\.\d+$/;
+    my $num = ip4_to_num($ip);
+    my $masked = $num >> (32 - TARGET_NETMASK);
+    $ips{$ip} =
+    {
+        num    => $num,
+        masked => $masked,
+    };
+    ++$masks{$masked};
+}
+
+my $i = 0;
+for my $mask (sort { $masks{$b} <=> $masks{$a} } keys %masks)
+{
+    say "$masks{$mask}:";
+    for my $ip (sort { $ips{$a}->{num} <=> $ips{$b}->{num} }
+                grep { $ips{$_}->{masked} == $mask } keys %ips)
+    {
+        say "  $ip";
+    }
+    last if $i++ >= 10;
+}
+
+close($fh);
