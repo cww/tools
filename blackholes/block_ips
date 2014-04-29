@@ -28,7 +28,7 @@
 # iptables(8) utility to blackhole those IP addresses.  Of course, This
 # script requires that kernel support for iptables is enabled.
 
-BLACKHOLES_URL="https://raw.github.com/cww/tools/master/blackholes/blackholes.txt"
+BLACKHOLES_URL="https://raw.githubusercontent.com/cww/tools/master/blackholes/blackholes.txt"
 
 ips=( $(curl -s "$BLACKHOLES_URL") )
 if [[ $? -ne 0 ]]
