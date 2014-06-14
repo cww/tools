@@ -25,7 +25,7 @@
 use common::sense;
 
 use constant FILENAME => 'blackholes.txt';
-use constant TARGET_NETMASK => 25;
+use constant TARGET_NETMASK => 24;
 
 sub ip4_to_num
 {
