@@ -1,8 +1,8 @@
-#!/bin/zsh
+#!/usr/bin/perl
 #
 # The MIT License (MIT)
 #
-# Copyright (c) 2013 Colin Wetherbee
+# Copyright (c) 2014 Colin Wetherbee
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,95 +22,299 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-function ip4_to_num
+use strict;
+use warnings;
+use feature qw(say state switch);
+
+use File::Basename qw();
+use lib File::Basename::dirname($0);
+use Tree::Interval;
+
+use Carp;
+use Compress::Zlib;
+use File::Copy qw();
+use Net::DNS::Resolver;
+
+use constant BH_FILE => 'blackholes.txt';
+use constant TMP_FILE => 'blackholes.txt.new';
+
+my $base_dir = File::Basename::dirname($0);
+my $bh_file = $base_dir . '/' . BH_FILE;
+my $tmp_file = $base_dir . '/' . TMP_FILE;
+my $ranges = Tree::Interval->new();
+
+sub log2 { log($_[0]) / log(2) }
+
+# IP address to integer
+sub convert_ip
 {
-    ip=$1
-    IFS=. read -r a b c d <<< "$ip"
-    print $((a * 256 ** 3 + b * 256 ** 2 + c * 256 + d))
+    my ($ip) = @_;
+
+    confess 'Must provide IP address' unless defined $ip;
+
+    my ($a, $b, $c, $d) = split(/\./, $ip);
+    my $num = ($a << 24) | ($b << 16) | ($c << 8) | $d;
+    return $num;
 }
 
-function ip4_overlap
+# IP address netmask to integer range
+sub convert_masked
 {
-    local range=$1
-    local ip=$2
+    my ($range) = @_;
 
-    IFS=/ read -r net mask <<< "$range"
+    confess 'Must provide IP netmask' unless defined $range;
 
-    if [[ -z $net || -z $mask ]]
-    then
-        if [[ $range == $ip ]]
-        then
-            return 0
+    my ($net, $mask) = split(m|/|, $range);
+    my $start = convert_ip($net);
+    my $end = $start + 2 ** (32 - $mask) - 1;
+    return ($start, $end);
+}
+
+# Integer(s) to IP address or netmask
+sub convert_num
+{
+    my ($start, $end) = @_;
+
+    confess 'Must provide start integer' unless defined $start;
+    if (defined($end) && $start == $end)
+    {
+        undef $end;
+    }
+    elsif (defined $end)
+    {
+        confess 'Range end must be greater than range start'
+            unless $end > $start;
+    }
+
+    my $a = ($start >> 24) & 0xff;
+    my $b = ($start >> 16) & 0xff;
+    my $c = ($start >>  8) & 0xff;
+    my $d = ($start      ) & 0xff;
+
+    my $ip = join(q{.}, $a, $b, $c, $d);
+
+    if (defined $end)
+    {
+        my $mask = log2($end - $start + 1);
+        croak "Non-power-of-two mask for range starting at $ip ($start)"
+            unless $mask == int($mask);
+        $ip .= "/$mask";
+    }
+
+    return $ip;
+}
+
+sub read_blackholes
+{
+    open(my $fh, '<', $bh_file) or die $!;
+
+    while (my $line = <$fh>)
+    {
+        chomp $line;
+
+        my ($start, $end);
+        if ($line =~ m|/|)
+        {
+            ($start, $end) = convert_masked($line);
+        }
         else
-            return 1
-        fi
-    fi
+        {
+            my $num = convert_ip($line);
+            $start = $end = $num;
+        }
+        $ranges->insert($start, $end, $line);
+    }
 
-    range_masked=$(( $(ip4_to_num $net) >> (32 - $mask) ))
-    ip_masked=$(( $(ip4_to_num $ip) >> (32 - $mask) ))
-
-    if [[ $range_masked == $ip_masked ]]
-    then
-        return 0
-    else
-        return 1
-    fi
+    close($fh);
 }
 
-BLACKHOLES_FILE=blackholes.txt
-TMP_FILE=.blackholes.txt
+# Resolve a hostname into an IP address.
+#
+# Returns a list of IP addresses.
+sub resolve_ips
+{
+    my ($hostname);
 
-if [[ ! -r $BLACKHOLES_FILE ]]
-then
-    print "Blackholes file '$BLACKHOLES_FILE' not found" >&2
-    exit 1
-fi
+    state $_res = Net::DNS::Resolver->new();
 
-files=(/var/log/auth.log*)
-text_files=()
-gzip_files=()
+    my @ips;
+    my $q = $_res->search($hostname);
+    if ($q)
+    {
+        for my $rr ($q->answer())
+        {
+            given ($rr->type())
+            {
+                when (q{A}) { continue; }
+                when (q{AAAA})
+                {
+                    my $address = $rr->address();
+                    if ($address)
+                    {
+                        push(@ips, $address);
+                    }
+                    else
+                    {
+                        say STDERR "Unable to resolve: $hostname";
+                        exit 2;
+                    }
+                }
+            }
+        }
+    }
 
-for file in $files
-do
-    # Get the file's MIME type
-    type=$(file -ib "$file" | sed 's/;.*$//')
-    print "$file: $type"
-    if [[ $type == "text/plain" ]]
-    then
-        text_files+=$file
-    elif [[ $type == "application/gzip" ||
-            $type == "application/x-gzip" ]]
-    then
-        gzip_files+=$file
+    return @ips;
+}
+
+sub import_ips
+{
+    my ($wrapper) = @_;
+
+    sub add_ips
+    {
+        my ($line, $ips_ref, @ips) = @_;
+
+        for (@ips)
+        {
+            if (!defined($_) || $_ =~ /^0/ || $_ eq q{})
+            {
+                say STDERR "Unable to resolve host '$_' from line: $line";
+                exit 2;
+            }
+            else
+            {
+                undef $ips_ref->{$_};
+            }
+        }
+    }
+
+    my %ips;
+    while (my $line = $wrapper->{get_line}->())
+    {
+        chomp $line;
+        if ($line =~ /fail/i &&
+            $line !~ /Too many authentication failures/ &&
+            $line !~ /Connection reset by peer/ &&
+            $line !~ /\bsshd\[\d+\]:.*connect_to.*failed/ &&
+            $line !~ /\bsshd\[\d+\]:.*channel.*open failed/ &&
+            $line !~ /\bsu\[\d+\]: / &&
+            $line !~ /\bsshd\[\d+\]:.*open \/dev\/\S+ failed\b/)
+        {
+            if ($line =~ /rhost=(\S+)/ || $line =~ /from\s+(\S+)/)
+            {
+                my $parsed = $1;
+                my @new_ips = $parsed =~ /^\d+\.\d+\.\d+\.\d+$/ ?
+                              ($parsed) :
+                              resolve_ips($parsed);
+                add_ips($line, \%ips, @new_ips);
+            }
+            elsif ($line =~ /\s(\S+)\s+\[(\S+)\]\s+failed/)
+            {
+                my ($parsed_hostname, $parsed_ip) = ($1, $2);
+                my @hostname_ips = resolve_ips($parsed_hostname);
+                add_ips($line, \%ips, @hostname_ips, $parsed_ip);
+            }
+            else
+            {
+                say STDERR "Unable to parse failure candidate: $line";
+            }
+        }
+    }
+
+    for my $ip (keys %ips)
+    {
+        my $num = convert_ip($ip);
+        if (!$ranges->find($num))
+        {
+            say "New blackhole: $ip ($num)";
+            undef local $@;
+            eval
+            {
+                $ranges->insert($num, $num, $ip);
+            };
+
+            if ($@)
+            {
+                say "Failure trying to insert $ip ($num): ", $@;
+                exit 2;
+            }
+        }
+    }
+}
+
+sub read_logs
+{
+    my @files = </var/log/auth.log*>;
+
+    for my $file (@files)
+    {
+        if ($file =~ m|/auth\.log(?:\.\d+)?$|)
+        {
+            if (open(my $fh, '<', $file))
+            {
+                say "Reading file $file...";
+                my $wrapper =
+                {
+                    get_line => sub { <$fh> }
+                };
+                import_ips($wrapper);
+                close($fh);
+            }
+            else
+            {
+                my $err = $!;
+                say STDERR "ERROR!  Unable to read $file: $err";
+            }
+        }
+        elsif ($file =~ m|/auth\.log\.\d+\.gz$|)
+        {
+            my $gz = gzopen($file, 'rb');
+            if ($gz)
+            {
+                say "Reading compressed file $file...";
+                my $wrapper =
+                {
+                    get_line => sub
+                    {
+                        my $x;
+                        return $gz->gzreadline($x) > 0 ? $x : undef
+                    }
+                };
+                import_ips($wrapper);
+                $gz->gzclose();
+            }
+            else
+            {
+                say STDERR "ERROR!  Unable to read $file!";
+            }
+        }
+    }
+}
+
+sub export_ips
+{
+    if (open(my $fh, '>', $tmp_file))
+    {
+        my $count = 0;
+        for my $val ($ranges->values())
+        {
+            say $fh $val;
+            ++$count;
+        }
+        close($fh);
+
+        File::Copy::move($tmp_file, $bh_file);
+
+        say "Wrote $count black holes to $bh_file";
+    }
     else
-        print "Unknown file type '$type' for file: $file" >&2
-    fi
-done
+    {
+        say STDERR "ERROR!  Unable to write to temp file: $!";
+        exit 2;
+    }
+}
 
-new_ips=( $(zcat $gzip_files | ./print_failures $text_files) )
-ips=( $(cat "$BLACKHOLES_FILE") )
-
-for new_ip in $new_ips
-do
-    local found=0
-    for ip in $ips
-    do
-        if ip4_overlap $ip $new_ip
-        then
-            found=1
-            break
-        fi
-    done
-
-    if [[ $found -eq 0 ]]
-    then
-        ips+=$new_ip
-    fi
-done
-
-for ip in $ips
-do
-    print $ip
-done | sort -V > $TMP_FILE
-
-mv -f "$TMP_FILE" "$BLACKHOLES_FILE"
+read_blackholes();
+read_logs();
+export_ips();
+exit 0;
