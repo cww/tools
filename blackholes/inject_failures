@@ -26,6 +26,8 @@ use strict;
 use warnings;
 use feature qw(say state switch);
 
+no warnings 'experimental';
+
 use FindBin;
 use lib $FindBin::Bin;
 
