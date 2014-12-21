@@ -31,10 +31,7 @@ sub ip4_to_num
 {
     my ($ip) = @_;
     my ($a, $b, $c, $d) = split(/\./, $ip);
-    return $a * 256 ** 3 +
-           $b * 256 ** 2 +
-           $c * 256 ** 1 +
-           $d;
+    return ($a << 24) | ($b << 16) | ($c << 8) | $d;
 }
 
 my $fh;
