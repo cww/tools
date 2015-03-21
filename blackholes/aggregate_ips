@@ -108,7 +108,7 @@ sub load_ips {
     }
     $p_load->update($entries_loaded) if $entries_loaded >= $p_load_next;
 
-    say "Generated $ips_generated IPs";
+    say "Generated $ips_generated IP addresses";
     return (\%ips, \%masks);
 }
 
