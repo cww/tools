@@ -25,10 +25,15 @@
 use common::sense;
 
 use List::MoreUtils qw(any);
+use Term::ProgressBar;
 
 use constant FILENAME => 'blackholes.txt';
 use constant MIN_NETMASK => 8;
 use constant MAX_NETMASK => 27;
+
+# Number of seconds to wait between logging status updates while parsing the
+# blackholes file
+use constant LOG_INTERVAL => 2.5;
 
 # Minimum ratio of bad IPs to good IPs within a range in order to trigger a
 # report
@@ -45,37 +50,87 @@ sub ip4_to_num {
     return ($a << 24) | ($b << 16) | ($c << 8) | $d;
 }
 
-my $fh;
-open($fh, '<', FILENAME) or die $!;
-
-my %ips;
-my %masks;
-for my $ip (<$fh>) {
-    chomp $ip;
-    next unless $ip =~ /^\d+\.\d+\.\d+\.\d+$/;
-    my $num = ip4_to_num($ip);
-    my @maskednums = map { $num >> (32 - $_) } (MIN_NETMASK .. MAX_NETMASK);
-    $ips{$ip} = {
-        num         => $num,
-        maskednums  => \@maskednums,
-    };
-    for (my $i = MIN_NETMASK; $i <= MAX_NETMASK; ++$i) {
-        ++$masks{$i}{$maskednums[$i - MIN_NETMASK]};
-    }
+sub get_raw_ips {
+    my $fh;
+    open($fh, '<', FILENAME) or die $!;
+    my @raw_ips = <$fh>;
+    close($fh);
+    return \@raw_ips;
 }
-close($fh);
 
-for my $netmask (sort { $a <=> $b } keys %masks) {
+sub load_ips {
+    my ($raw_ips_ref) = @_;
+
+    my $p_load = Term::ProgressBar->new({
+        count => scalar @$raw_ips_ref,
+        name => 'Loading',
+        remove => 1,
+    });
+    $p_load->minor(0);
+    my $p_load_next = 0;
+    my %ips;
+    my %masks;
+    my $entries_loaded = 0;
+    my $ips_generated = 0;
+    for my $raw_ip (@$raw_ips_ref) {
+        chomp $raw_ip;
+
+        my @generated_ips;
+
+        if ($raw_ip =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/) {
+            my ($network, $netmask) = ($1, $2);
+            my $num = ip4_to_num($network);
+            my $net_size = 2 ** (32 - $netmask);
+            for (my $i = 0; $i < $net_size; ++$i) {
+                push(@generated_ips, $num + $i);
+            }
+            $ips_generated += $net_size;
+        }
+        elsif ($raw_ip =~ /^\d+\.\d+\.\d+\.\d+$/) {
+            push(@generated_ips, $raw_ip);
+            ++$ips_generated;
+        }
+
+        for my $ip (@generated_ips) {
+            my $num = ip4_to_num($ip);
+            my @maskednums = map { $num >> (32 - $_) } (MIN_NETMASK .. MAX_NETMASK);
+            $ips{$ip} = {
+                num         => $num,
+                maskednums  => \@maskednums,
+            };
+            for (my $i = MIN_NETMASK; $i <= MAX_NETMASK; ++$i) {
+                ++$masks{$i}{$maskednums[$i - MIN_NETMASK]};
+            }
+        }
+
+        ++$entries_loaded;
+        $p_load_next = $p_load->update($entries_loaded) if $entries_loaded >= $p_load_next;
+    }
+    $p_load->update($entries_loaded) if $entries_loaded >= $p_load_next;
+
+    say "Generated $ips_generated IPs";
+    return (\%ips, \%masks);
+}
+
+my $raw_ips_ref = get_raw_ips();
+my ($ips_ref, $masks_ref) = load_ips($raw_ips_ref);
+
+say "Finding good aggregates...";
+
+for my $netmask (sort { $a <=> $b } keys %$masks_ref) {
     my $max_count = 2 ** (32 - $netmask);
-    for my $maskednum (sort { $a <=> $b } keys %{$masks{$netmask}}) {
-        my $count = $masks{$netmask}{$maskednum};
+    for my $maskednum (sort { $a <=> $b } keys %{$masks_ref->{$netmask}}) {
+        my $count = $masks_ref->{$netmask}{$maskednum};
         if ($count / $max_count >= THRESHOLD) {
             my $network = num_to_ip4($maskednum << (32 - $netmask));
             say "$network/$netmask (found $count of $max_count):";
-            for my $ip (sort { $ips{$a}{num} <=> $ips{$b}{num} }
-                        grep { $ips{$_}{maskednums}[$netmask - MIN_NETMASK] == $maskednum } keys %ips) {
+            for my $ip (sort { $ips_ref->{$a}{num} <=> $ips_ref->{$b}{num} }
+                        grep { $ips_ref->{$_}{maskednums}[$netmask - MIN_NETMASK]
+                               == $maskednum } keys %$ips_ref) {
                 say "  $ip";
             }
         }
     }
 }
+
+say "Finished!";
