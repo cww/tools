@@ -82,7 +82,7 @@ sub load_ips {
             my $num = ip4_to_num($network);
             my $net_size = 2 ** (32 - $netmask);
             for (my $i = 0; $i < $net_size; ++$i) {
-                push(@generated_ips, $num + $i);
+                push(@generated_ips, $num++);
             }
             $ips_generated += $net_size;
         }
