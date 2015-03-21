@@ -122,6 +122,7 @@ sub read_blackholes
         {
             my $num = convert_ip($line);
             $start = $end = $num;
+            next if $ranges->find($start);
         }
         $ranges->insert($start, $end, $line);
     }
