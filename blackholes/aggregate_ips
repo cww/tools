@@ -2,7 +2,7 @@
 #
 # The MIT License (MIT)
 #
-# Copyright (c) 2014 Colin Wetherbee
+# Copyright (c) 2014, 2015 Colin Wetherbee
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,11 +24,22 @@
 
 use common::sense;
 
-use constant FILENAME => 'blackholes.txt';
-use constant TARGET_NETMASK => 24;
+use List::MoreUtils qw(any);
 
-sub ip4_to_num
-{
+use constant FILENAME => 'blackholes.txt';
+use constant MIN_NETMASK => 8;
+use constant MAX_NETMASK => 27;
+
+# Minimum ratio of bad IPs to good IPs within a range in order to trigger a
+# report
+use constant THRESHOLD => 0.1;
+
+sub num_to_ip4 {
+    my ($num) = @_;
+    return join(q{.}, map { ($num >> (24 - 8 * $_)) & 0xff } (0 .. 3));
+}
+
+sub ip4_to_num {
     my ($ip) = @_;
     my ($a, $b, $c, $d) = split(/\./, $ip);
     return ($a << 24) | ($b << 16) | ($c << 8) | $d;
@@ -39,30 +50,32 @@ open($fh, '<', FILENAME) or die $!;
 
 my %ips;
 my %masks;
-for my $ip (<$fh>)
-{
+for my $ip (<$fh>) {
     chomp $ip;
     next unless $ip =~ /^\d+\.\d+\.\d+\.\d+$/;
     my $num = ip4_to_num($ip);
-    my $masked = $num >> (32 - TARGET_NETMASK);
-    $ips{$ip} =
-    {
-        num    => $num,
-        masked => $masked,
+    my @maskednums = map { $num >> (32 - $_) } (MIN_NETMASK .. MAX_NETMASK);
+    $ips{$ip} = {
+        num         => $num,
+        maskednums  => \@maskednums,
     };
-    ++$masks{$masked};
-}
-
-my $i = 0;
-for my $mask (sort { $masks{$b} <=> $masks{$a} } keys %masks)
-{
-    say "$masks{$mask}:";
-    for my $ip (sort { $ips{$a}->{num} <=> $ips{$b}->{num} }
-                grep { $ips{$_}->{masked} == $mask } keys %ips)
-    {
-        say "  $ip";
+    for (my $i = MIN_NETMASK; $i <= MAX_NETMASK; ++$i) {
+        ++$masks{$i}{$maskednums[$i - MIN_NETMASK]};
     }
-    last if $i++ >= 10;
 }
-
 close($fh);
+
+for my $netmask (sort { $a <=> $b } keys %masks) {
+    my $max_count = 2 ** (32 - $netmask);
+    for my $maskednum (sort { $a <=> $b } keys %{$masks{$netmask}}) {
+        my $count = $masks{$netmask}{$maskednum};
+        if ($count / $max_count >= THRESHOLD) {
+            my $network = num_to_ip4($maskednum << (32 - $netmask));
+            say "$network/$netmask (found $count of $max_count):";
+            for my $ip (sort { $ips{$a}{num} <=> $ips{$b}{num} }
+                        grep { $ips{$_}{maskednums}[$netmask - MIN_NETMASK] == $maskednum } keys %ips) {
+                say "  $ip";
+            }
+        }
+    }
+}
