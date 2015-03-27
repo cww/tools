@@ -39,17 +39,21 @@ use constant LOG_INTERVAL => 2.5;
 # report
 use constant THRESHOLD => 0.1;
 
+# Convert the integer representation of an IP address to an IP address string.
 sub num_to_ip4 {
     my ($num) = @_;
     return join(q{.}, map { ($num >> (24 - 8 * $_)) & 0xff } (0 .. 3));
 }
 
+# Convert an IP address string to its integer representation.
 sub ip4_to_num {
     my ($ip) = @_;
     my ($a, $b, $c, $d) = split(/\./, $ip);
     return ($a << 24) | ($b << 16) | ($c << 8) | $d;
 }
 
+# Read the black holes file and return a list containing IP addresses and
+# network masks.
 sub get_raw_ips {
     my $fh;
     open($fh, '<', FILENAME) or die $!;
@@ -58,6 +62,8 @@ sub get_raw_ips {
     return \@raw_ips;
 }
 
+# Parse a list (ref) of blackholes (returned by get_raw_ips()) and store its
+# metadata.
 sub load_ips {
     my ($raw_ips_ref) = @_;
 
@@ -68,6 +74,7 @@ sub load_ips {
     });
     $p_load->minor(0);
     my $p_load_next = 0;
+
     my %ips;
     my %masks;
     my $entries_loaded = 0;
@@ -78,6 +85,8 @@ sub load_ips {
         my @generated_ips;
 
         if ($raw_ip =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/) {
+            # Parse a network mask.  Store each IP address represented by the
+            # mask.
             my ($network, $netmask) = ($1, $2);
             my $num = ip4_to_num($network);
             my $net_size = 2 ** (32 - $netmask);
