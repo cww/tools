@@ -24,18 +24,10 @@
 #
 ###########################################################################
 #
-# This script retrieves a list of blackhole IP addresses and uses the
-# iptables(8) utility to blackhole those IP addresses.  Of course, This
-# script requires that kernel support for iptables is enabled.
+# This script blacklists the IP addresses and network masks stored in the
+# blackholes file.  Requires iptables and kernel support thereof.
 
-BLACKHOLES_URL="https://raw.githubusercontent.com/cww/tools/master/blackholes/blackholes.txt"
-
-ips=( $(curl -s "$BLACKHOLES_URL") )
-if [[ $? -ne 0 ]]
-then
-    print "ERROR: Unable to retrieve blackhole list!"
-    exit 1
-fi
+ips=( $(cat $(dirname $0:A)/blackholes.txt) )
 
 for ip in $ips
 do
